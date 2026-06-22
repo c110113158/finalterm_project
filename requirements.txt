@@ -4,3 +4,4 @@ yfinance==1.4.1
 requests==2.33.1
 gdeltdoc==1.12.0
 gunicorn==23.0.0
+google-generativeai==0.8.5

@@ -3,6 +3,8 @@ core.py
 Data-fetching and question-answering logic for the BTC sentiment LINE Bot.
 Kept separate from app.py (the Flask/webhook layer) so it can be tested directly.
 """
+import logging
+import os
 import re
 from datetime import datetime, timedelta
 
@@ -10,6 +12,22 @@ import numpy as np
 import pandas as pd
 import requests
 import yfinance as yf
+import google.generativeai as genai
+
+logger = logging.getLogger(__name__)
+
+# ----------------------------------------------------------------------
+# Gemini (Google AI Studio) setup — used as a fallback when no keyword
+# intent matches, so the bot can still answer free-form questions.
+# ----------------------------------------------------------------------
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+_gemini_model = None
+
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    _gemini_model = genai.GenerativeModel("gemini-2.0-flash")
+else:
+    logger.warning("GEMINI_API_KEY is not set. AI fallback replies will be disabled.")
 
 # ----------------------------------------------------------------------
 # Simple in-memory cache so we don't re-hit external APIs on every message.
@@ -283,6 +301,39 @@ def respond_help():
     )
 
 
+def ask_gemini(text):
+    """
+    Fallback responder for messages that don't match any keyword intent.
+    Sends the user's question to Gemini (Google AI Studio) and returns
+    its reply as plain text, in Traditional Chinese to match the rest
+    of the bot's tone.
+    """
+    if _gemini_model is None:
+        return (
+            "抱歉，我還不太理解這個問題 🙏\n"
+            "輸入「help」可以看看我能回答哪些問題喔！"
+        )
+
+    prompt = (
+        "你是一個 LINE 聊天機器人，負責協助使用者了解比特幣（BTC）價格、"
+        "市場情緒（恐懼貪婪指數）、新聞語氣與波動率等研究主題。"
+        "請用繁體中文，簡潔、友善地回答使用者的問題，"
+        "若問題與比特幣或金融市場無關，也可以正常回答，但保持簡短（3-4句以內）。\n\n"
+        f"使用者問題：{text}"
+    )
+
+    try:
+        response = _gemini_model.generate_content(
+            prompt,
+            generation_config={"max_output_tokens": 300},
+        )
+        reply = (response.text or "").strip()
+        return reply if reply else respond_unknown()
+    except Exception as e:
+        logger.exception("Gemini call failed")
+        return f"⚠️ AI 回覆時發生錯誤，請稍後再試。\n({type(e).__name__})"
+
+
 def respond_unknown():
     return (
         "抱歉，我還不太理解這個問題 🙏\n"
@@ -297,13 +348,16 @@ _HANDLERS = {
     "query_volatility": respond_volatility,
     "compare_risk": respond_compare_risk,
     "help": respond_help,
-    "unknown": respond_unknown,
 }
 
 
 def answer(text):
     """Main entry point: takes raw user text, returns a reply string."""
     intent = detect_intent(text)
+
+    if intent == "unknown":
+        return ask_gemini(text)
+
     handler = _HANDLERS.get(intent, respond_unknown)
     try:
         return handler()
