@@ -25,7 +25,7 @@ _gemini_model = None
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    _gemini_model = genai.GenerativeModel("gemini-2.0-flash")
+    _gemini_model = genai.GenerativeModel("gemini-3.5-flash")
 else:
     logger.warning("GEMINI_API_KEY is not set. AI fallback replies will be disabled.")
 
